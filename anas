@@ -1,0 +1,121 @@
+import cv2
+import cvzone
+from cvzone.FaceMeshModule import FaceMeshDetector
+from cvzone.PlotModule import LivePlot
+
+from twilio.rest import Client
+import key
+import location as loc
+
+cap = cv2.VideoCapture(0)
+detector = FaceMeshDetector(maxFaces=1)
+plotY = LivePlot(640, 360, [20, 50], invert=True)
+
+idList = [22, 23, 24, 26, 110, 157, 158, 159, 160, 161, 130, 243]
+ratioList = []
+blinkCounterSleep = 0
+blinkCounterDrowsy = 0
+counter = 0
+status = ""
+color = (0, 0, 0)
+
+a = 0
+
+
+
+def warningMass():
+    client = Client(key.account_sid, key.auth_token)
+
+    message = client.messages.create(
+        body=f'\nI hava a problem !'
+             f'\nTime:{loc.current_time}'
+             f'\nDate: {loc.current_date}'
+             f'\nLocation: {loc.x}'
+             f'\nPlease call the Emergency !!',
+        from_=key.twilio_number,
+        to=key.my_phone_number
+    )
+
+    print(message.body)
+
+
+
+
+while True:
+    a += 1
+    # if cap.get(cv2.CAP_PROP_POS_FRAMES) == cap.get(cv2.CAP_PROP_FRAME_COUNT):
+    #     cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+    if a / 10 % 1 == 0:
+        print(a / 10)
+    if a % 300 == 0:  # 300 secs
+        blinkCounterSleep = 0
+        blinkCounterDrowsy = 0
+        counter = 0
+        status = ""
+
+    success, img = cap.read()
+    img, faces = detector.findFaceMesh(img, draw=False)
+
+    if faces:
+        face = faces[0]
+        for _id in idList:
+            cv2.circle(img, face[_id], 5, color, cv2.FILLED)
+
+        leftUp = face[159]
+        leftDown = face[23]
+        leftLeft = face[130]
+        leftRight = face[243]
+        lenghtVer, _ = detector.findDistance(leftUp, leftDown)
+        lenghtHor, _ = detector.findDistance(leftLeft, leftRight)
+
+        cv2.line(img, leftUp, leftDown, (0, 200, 0), 3)
+        cv2.line(img, leftLeft, leftRight, (0, 200, 0), 3)
+
+        ratio = int((lenghtVer / lenghtHor) * 100)
+
+        ratioList.append(ratio)
+        if len(ratioList) > 3:
+            ratioList.pop(0)
+        ratioAvg = sum(ratioList) / len(ratioList)
+
+        if 35 > ratioAvg > 30 and counter == 0:
+            blinkCounterDrowsy += 1
+            counter = 1
+
+        elif 30 > ratioAvg and counter == 0:
+            blinkCounterSleep += 1
+            counter = 1
+
+        if counter != 0:
+            counter += 1
+            if counter > 10:
+                counter = 0
+                color = (255, 0, 255)
+
+        cvzone.putTextRect(img, f'Drowsy: {blinkCounterDrowsy}', (50, 50), colorR=(50, 50, 255))
+        cvzone.putTextRect(img, f'Sleep: {blinkCounterSleep}', (350, 50), colorR=(255, 50, 50))
+
+        if 7 < blinkCounterSleep:
+            status = "SLEEPING !!!"
+            warningMass()
+            blinkCounterSleep = 0
+            blinkCounterDrowsy = 0
+        elif 20 < blinkCounterDrowsy:
+            status = "Drowsy !"
+            warningMass()
+            blinkCounterSleep = 0
+            blinkCounterDrowsy = 0
+
+        cvzone.putTextRect(img, f'{status}', (50, 150), colorR=(0, 0, 0), font=cv2.FONT_HERSHEY_SIMPLEX)
+
+        imgPlot = plotY.update(ratioAvg, color)
+        img = cv2.resize(img, (640, 360))
+        imgStack = cvzone.stackImages([img, imgPlot], 2, 1)
+    else:
+        img = cv2.resize(img, (640, 360))
+        imgStack = cvzone.stackImages([img, img], 2, 1)
+
+    cv2.imshow("Image", imgStack)
+    cv2.waitKey(25)
+
+
